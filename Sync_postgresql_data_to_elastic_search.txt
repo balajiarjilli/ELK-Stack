@@ -1,0 +1,116 @@
+HOW TO SYNC POSTGRESQL DATA TO ELASTIC SEARCH
+
+install java
+------------
+sudo amazon-linux-extras install java-openjdk11
+
+install elastic search
+----------------------
+cd /etc/yum.repos.d/
+vi elasticsearch.repo
+	[elasticsearch]
+	name=Elasticsearch repository for 7.x packages
+	baseurl=https://artifacts.elastic.co/packages/7.x/yum
+	gpgcheck=1
+	gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+	enabled=1
+	autorefresh=1
+	type=rpm-md
+	rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+	yum install elastisearch
+	systemctl start elasticsearch
+
+
+rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+yum install elasticsearch
+systemctl start elasticsearch
+
+
+Setup PostgreSQL 10 Database For SonarQube
+------------------------------------------
+
+amazon-linux-extras install postgresql10 vim epel -y
+yum install -y postgresql-server postgresql-devel
+/usr/bin/postgresql-setup --initdb
+
+->change ip4 local connections to md5
+vi /var/lib/pgsql/data/pg_hba.conf
+
+systemctl start postgresql
+su - postgres
+psql
+  #\password postgres
+  enter password: postgres
+  enter it again: postgres
+  
+DROP TABLE IF EXISTS links;
+
+CREATE TABLE links (
+	id SERIAL PRIMARY KEY,
+	url VARCHAR(255) NOT NULL,
+	name VARCHAR(255) NOT NULL,
+	description VARCHAR (255),
+        last_update DATE
+);
+
+INSERT INTO links (url, name)
+VALUES('https://www.postgresqltutorial.com','PostgreSQL Tutorial');
+INSERT INTO links (url, name)
+VALUES('http://www.oreilly.com','O''Reilly Media');
+SELECT	* FROM links;
+
+
+INSTALL LOGSTASH
+----------------
+yum install logstash -y
+wget https://repo1.maven.org/maven2/org/postgresql/postgresql/42.2.23/postgresql-42.2.23.jar
+cd /usr/share/logstash/logstash-core/lib/jars
+cp /root/postgresql-42.2.23.jar /usr/share/logstash/logstash-core/lib/jars/
+rm -rf postgresql-42.2.23.jar
+cd /etc/logstash/conf.d/
+vi links.conf
+
+
+input {
+  jdbc {
+     jdbc_connection_string =>     "jdbc:postgresql://localhost:5432/postgres"
+     jdbc_user => "postgres"
+     jdbc_password => "postgres"
+     jdbc_driver_class => "org.postgresql.Driver"
+     statement => "SELECT * from links"
+ }
+}
+output {
+  elasticsearch {
+    hosts => ["http://localhost:9200"]
+    index => "links"
+    document_id => "links_%{id}"
+    doc_as_upsert => true
+    #user => "es_user"
+    #password => “es_password"
+ }
+}
+
+we have configured input and output for logstash
+input -  postgresql
+output-  elastic search
+
+vi /etc/logstash/pipelines.yml
+	path.congig: "/etc/logstash/conf.d/*.conf"
+
+cd /usr/share/logstash/bin
+systemctl start logstash
+./logstash -f /etc/logstash/conf.d/links.conf 
+
+
+to retrieve data from elastic search 
+http://<public-ip>:9200/<index_name>/_search?pretty=true&q=*:*
+http://13.233.167.131:9200/links/_search?pretty=true&q=*:*
+
+
+
+systemctl stop logstash
+systemctl stop elasticsearch
+systemctl stop postgresql
+systemctl start postgresql
+systemctl start elasticsearch
